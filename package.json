@@ -1,0 +1,35 @@
+{
+  "name": "ut-study-mcp-server",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "MCP server study-assistant untuk elearning.ut.ac.id (Moodle) — baca materi, lihat soal kuis (read-only), ekspor catatan",
+  "main": "src/index.ts",
+  "bin": {
+    "ut-study-mcp-server": "src/index.ts"
+  },
+  "keywords": ["mcp", "moodle", "ut", "elearning", "study-assistant", "puppeteer"],
+  "author": "amaralkaff",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0",
+    "bun": ">=1.0.0"
+  },
+  "files": ["src", "README.md", "LICENSE"],
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch src/index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.10.2",
+    "cheerio": "^1.0.0",
+    "puppeteer-real-browser": "^1.4.2",
+    "turndown": "^7.2.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.11",
+    "@types/node": "^22.14.0",
+    "@types/turndown": "^5.0.5",
+    "typescript": "^5.8.3"
+  }
+}
