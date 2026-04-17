@@ -19,41 +19,33 @@ function sanitizeFilename(name: string): string {
  * Download a file from a Moodle resource URL. Uses the authenticated puppeteer
  * session to follow any redirects and grab the final file.
  */
-export async function downloadResource(
+async function cookieHeader(page: Awaited<ReturnType<typeof getPage>>, url: string): Promise<string> {
+  const cookies = await page.cookies(url);
+  return cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+}
+
+async function fetchAuthenticated(
   url: string,
-  outDir: string
-): Promise<DownloadedFile> {
-  await mkdir(outDir, { recursive: true });
-  const page = await getPage();
+  page: Awaited<ReturnType<typeof getPage>>
+): Promise<{ buffer: Buffer; mimeType: string; filename: string; finalUrl: string }> {
+  const cookies = await cookieHeader(page, url);
+  const userAgent = await page.evaluate(() => navigator.userAgent);
+  const res = await fetch(url, {
+    headers: {
+      Cookie: cookies,
+      "User-Agent": userAgent,
+      Accept: "*/*",
+    },
+    redirect: "follow",
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status} dari ${url}`);
 
-  // Capture the final URL + response headers by intercepting
-  const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
-  if (!response) throw new Error(`No response for ${url}`);
-
-  const finalUrl = response.url();
-  const headers = response.headers();
-  const contentType = headers["content-type"] || "application/octet-stream";
+  const contentType = res.headers.get("content-type") || "application/octet-stream";
   const mimeType = contentType.split(";")[0].trim();
+  const finalUrl = res.url;
 
-  // If it's an HTML page (Moodle viewer), look for embedded file link
-  if (mimeType.includes("html")) {
-    const html = await page.content();
-    // Moodle resource viewer embeds: <object data="..."> or <iframe src="..."> or <a href="...pluginfile.php">
-    const match =
-      html.match(/<object[^>]+data="([^"]+pluginfile\.php[^"]+)"/i) ||
-      html.match(/<iframe[^>]+src="([^"]+pluginfile\.php[^"]+)"/i) ||
-      html.match(/href="([^"]+pluginfile\.php[^"]+)"/i);
-    if (match) {
-      // Decode HTML entities in URL
-      const embedUrl = match[1].replace(/&amp;/g, "&");
-      return downloadResource(embedUrl, outDir);
-    }
-    throw new Error(`Resource appears HTML-only (no embedded file): ${url}`);
-  }
-
-  // Extract filename from Content-Disposition or URL
   let filename = "";
-  const disposition = headers["content-disposition"];
+  const disposition = res.headers.get("content-disposition");
   if (disposition) {
     const m = disposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)/i);
     if (m) filename = decodeURIComponent(m[1]);
@@ -61,10 +53,43 @@ export async function downloadResource(
   if (!filename) {
     filename = decodeURIComponent(new URL(finalUrl).pathname.split("/").pop() || "download");
   }
-  filename = sanitizeFilename(filename);
 
-  // Download via page's authenticated context
-  const buffer = await response.buffer();
+  const buffer = Buffer.from(await res.arrayBuffer());
+  return { buffer, mimeType, filename, finalUrl };
+}
+
+export async function downloadResource(
+  url: string,
+  outDir: string
+): Promise<DownloadedFile> {
+  await mkdir(outDir, { recursive: true });
+  const page = await getPage();
+
+  // Step 1: if it's a Moodle /mod/resource/ URL, open page and find the real pluginfile link
+  let targetUrl = url;
+  if (url.includes("/mod/resource/view.php")) {
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    const html = await page.content();
+    const match =
+      html.match(/<object[^>]+data="([^"]+pluginfile\.php[^"]+)"/i) ||
+      html.match(/<iframe[^>]+src="([^"]+pluginfile\.php[^"]+)"/i) ||
+      html.match(/href="([^"]+pluginfile\.php[^"]+)"/i);
+    if (match) {
+      targetUrl = match[1].replace(/&amp;/g, "&");
+    } else {
+      // Moodle "force download" — resource view may auto-redirect; get final URL
+      const finalUrl = page.url();
+      if (finalUrl !== url && finalUrl.includes("pluginfile.php")) {
+        targetUrl = finalUrl;
+      } else {
+        throw new Error(`Tidak menemukan tautan file di resource page: ${url}`);
+      }
+    }
+  }
+
+  // Step 2: fetch via authenticated fetch to get raw bytes
+  const { buffer, mimeType, filename: rawName, finalUrl } = await fetchAuthenticated(targetUrl, page);
+  const filename = sanitizeFilename(rawName);
   const filePath = path.join(outDir, filename);
   await Bun.write(filePath, buffer);
 
