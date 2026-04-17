@@ -6,7 +6,7 @@ import { mkdir } from "node:fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import { navigateWithRetry } from "../browser.js";
-import { parseCourseSections, parseCourseTitle } from "../parsers/course.js";
+import { parseCourseSections, parseCourseTitle, parseSectionTabs } from "../parsers/course.js";
 import type { CourseSection } from "../types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -54,7 +54,27 @@ async function getCourseData(courseId: string) {
   const courseUrl = `https://elearning.ut.ac.id/course/view.php?id=${courseId}`;
   const { html } = await navigateWithRetry(courseUrl);
   const $ = load(html);
-  return { title: parseCourseTitle($), sections: parseCourseSections(html), courseUrl };
+  const title = parseCourseTitle($);
+
+  const sectionsByNum = new Map<number, CourseSection>();
+  for (const s of parseCourseSections(html)) sectionsByNum.set(s.sectionNumber, s);
+
+  // Handle UT tab format: fetch each section URL separately
+  const allNums = parseSectionTabs(html, courseId);
+  for (const n of allNums) {
+    if (sectionsByNum.has(n)) continue;
+    try {
+      const { html: secHtml } = await navigateWithRetry(`${courseUrl}&section=${n}`);
+      for (const s of parseCourseSections(secHtml)) {
+        if (!sectionsByNum.has(s.sectionNumber)) sectionsByNum.set(s.sectionNumber, s);
+      }
+    } catch {
+      // continue
+    }
+  }
+
+  const sections = [...sectionsByNum.values()].sort((a, b) => a.sectionNumber - b.sectionNumber);
+  return { title, sections, courseUrl };
 }
 
 export function registerExportNotes(server: McpServer): void {

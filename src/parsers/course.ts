@@ -23,11 +23,16 @@ export function parseCourseSections(html: string): CourseSection[] {
     const sectionUrl = $sec.find("a.section-link").attr("href") || "";
 
     const items: SectionItem[] = [];
-    $sec.find("li.activity, .activity-item, li.modtype_quiz, li.modtype_resource").each((__, act) => {
+    const seenUrls = new Set<string>();
+
+    // Single selector — li.activity matches all activity items regardless of modtype_*
+    $sec.find("li.activity, .activity-item").each((__, act) => {
       const $act = $(act);
       const link = $act.find('a[href*="/mod/"]').first();
       const href = link.attr("href") || "";
-      if (!href) return;
+      if (!href || seenUrls.has(href)) return;
+      seenUrls.add(href);
+
       const name =
         link.find(".instancename").clone().children(".accesshide").remove().end().text().trim() ||
         link.text().trim();
@@ -53,4 +58,29 @@ export function parseCourseTitle($: CheerioAPI): string {
     $("h1.page-header-headings, header h1, .page-header-headings h1").first().text().trim() ||
     $("title").text().split("|")[0].trim()
   );
+}
+
+/**
+ * Extract list of section numbers from tab/nav navigation on a UT course page.
+ * UT uses tabs course format where only one section is visible at a time,
+ * and the nav shows links like ?id=COURSE&section=N.
+ */
+export function parseSectionTabs(html: string, courseId: string): number[] {
+  const $ = load(html);
+  const nums = new Set<number>();
+
+  // Tab nav links
+  $(`a[href*='course/view.php'][href*='id=${courseId}']`).each((_, el) => {
+    const href = $(el).attr("href") || "";
+    const m = href.match(/[?&]section=(\d+)/);
+    if (m) nums.add(Number(m[1]));
+  });
+
+  // Jump-to-section dropdown (fallback)
+  $("select[name='jumptosection'] option, .single_section_nav select option").each((_, el) => {
+    const v = $(el).attr("value") || "";
+    if (/^\d+$/.test(v)) nums.add(Number(v));
+  });
+
+  return [...nums].sort((a, b) => a - b);
 }
