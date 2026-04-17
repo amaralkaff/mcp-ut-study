@@ -13,7 +13,7 @@ import { registerReadMaterial } from "./tools/read-material.js";
 import { registerListAssessments } from "./tools/list-assessments.js";
 import { registerGetQuizQuestions } from "./tools/get-quiz-questions.js";
 import { registerListAttendance } from "./tools/list-attendance.js";
-import { registerExportNotes } from "./tools/export-notes.js";
+import { registerExportNotes, registerExportSection } from "./tools/export-notes.js";
 
 const server = new McpServer({
   name: "ut-study-assistant",
@@ -29,6 +29,7 @@ registerListAssessments(server);
 registerGetQuizQuestions(server);
 registerListAttendance(server);
 registerExportNotes(server);
+registerExportSection(server);
 
 async function shutdown() {
   console.error("[server] Mematikan...");
