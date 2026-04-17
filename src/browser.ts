@@ -7,7 +7,12 @@ const COOKIES_PATH = path.join(__dirname, "..", "cookies.json");
 const NAV_TIMEOUT = 30_000;
 const NAV_TIMEOUT_RETRY = 60_000;
 
-const ALLOWED_HOSTS = new Set(["elearning.ut.ac.id"]);
+const ALLOWED_HOSTS = new Set([
+  "elearning.ut.ac.id",
+  "myut.ut.ac.id",
+  "sso.ut.ac.id",
+  "auth.ut.ac.id",
+]);
 
 export function validateUrl(url: string): void {
   let parsed: URL;

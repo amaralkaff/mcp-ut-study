@@ -1,55 +1,92 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { load } from "cheerio";
-import { navigateWithRetry } from "../browser.js";
+import { navigateWithRetry, getPage } from "../browser.js";
 
-const LOGIN_URL = "https://elearning.ut.ac.id/login/index.php";
+const MYUT_LOGIN = "https://myut.ut.ac.id/auth/login/v2";
+const ELEARNING_HOME = "https://elearning.ut.ac.id/my/";
 
 export function registerLogin(server: McpServer): void {
   server.tool(
     "login",
-    "Login ke elearning.ut.ac.id (Moodle) dengan NIM dan password.",
+    "Buka halaman login MyUT (SSO) di browser. Anda login sendiri di jendela itu — password TIDAK dikirim via chat. Setelah selesai login di browser, panggil tool ini LAGI dengan done=true untuk verifikasi & simpan cookie.",
     {
-      username: z.string().describe("NIM / username UT"),
-      password: z.string().describe("Password akun UT"),
+      done: z
+        .boolean()
+        .optional()
+        .describe(
+          "Set true HANYA setelah Anda selesai login manual di browser. Tool akan verifikasi sesi ke elearning.ut.ac.id."
+        ),
+      waitSeconds: z
+        .number()
+        .int()
+        .min(10)
+        .max(600)
+        .optional()
+        .describe("Alternatif: tunggu N detik agar Anda login di browser, lalu auto-verifikasi. Default: tidak menunggu."),
     },
-    async ({ username, password }) => {
+    async ({ done, waitSeconds }) => {
       try {
-        const { page } = await navigateWithRetry(LOGIN_URL);
+        if (!done && !waitSeconds) {
+          await navigateWithRetry(MYUT_LOGIN);
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    status: "browser_opened",
+                    url: MYUT_LOGIN,
+                    next: "Login manual di jendela Chrome yang terbuka. Setelah selesai, panggil login lagi dengan { done: true }.",
+                  },
+                  null,
+                  2
+                ),
+              },
+            ],
+          };
+        }
 
-        await page.type('input[name="username"]', username, { delay: 60 });
-        await page.type('input[name="password"]', password, { delay: 60 });
+        if (waitSeconds) {
+          await navigateWithRetry(MYUT_LOGIN);
+          await new Promise((res) => setTimeout(res, waitSeconds * 1000));
+        }
 
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: "networkidle2", timeout: 30_000 }),
-          page.click('button[type="submit"], #loginbtn, input[type="submit"]'),
-        ]);
-
+        const page = await getPage();
+        await page.goto(ELEARNING_HOME, { waitUntil: "networkidle2", timeout: 60_000 });
         const html = await page.content();
         const $ = load(html);
 
-        const loggedIn = $('a[href*="login/logout.php"]').length > 0;
+        const loggedIn =
+          $('a[href*="login/logout.php"]').length > 0 ||
+          $(".usermenu .usertext, .userbutton .usertext").first().text().trim().length > 0;
 
         if (!loggedIn) {
-          const error =
-            $("#loginerrormessage").text().trim() ||
-            $(".loginerrors, .alert-danger").first().text().trim() ||
-            "Login gagal — periksa NIM/password";
           return {
             content: [
-              { type: "text", text: JSON.stringify({ success: false, error }, null, 2) },
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    success: false,
+                    error:
+                      "Belum terdeteksi login di elearning.ut.ac.id. Pastikan Anda selesai login di MyUT dan halaman sudah redirect, lalu panggil lagi dengan { done: true }.",
+                  },
+                  null,
+                  2
+                ),
+              },
             ],
             isError: true,
           };
         }
 
         const fullName = $(".usermenu .usertext, .userbutton .usertext").first().text().trim();
-
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify({ success: true, fullName: fullName || username }, null, 2),
+              text: JSON.stringify({ success: true, fullName: fullName || undefined }, null, 2),
             },
           ],
         };
